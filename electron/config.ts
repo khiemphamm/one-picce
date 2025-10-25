@@ -1,5 +1,5 @@
 export const APP_CONFIG = {
-  name: 'Tool Live',
+  name: 'One Piece',
   version: '1.0.0',
   maxViewers: 30,
   minViewers: 1,
