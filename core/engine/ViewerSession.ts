@@ -98,24 +98,63 @@ export class ViewerSession {
       }
 
       // WORKAROUND: Use system Chrome instead of Puppeteer's Chromium
-      // Puppeteer's Chromium has system-level issues on this macOS (socket hang up)
+      // Puppeteer's Chromium may have system-level issues (socket hang up on some macOS systems)
       try {
         const fs = require('fs');
-        const systemChromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+        const os = require('os');
+        const path = require('path');
         
-        if (fs.existsSync(systemChromePath)) {
+        let systemChromePath: string | null = null;
+        const platform = os.platform();
+        
+        // Detect Chrome path based on platform
+        if (platform === 'darwin') {
+          // macOS
+          systemChromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+        } else if (platform === 'win32') {
+          // Windows - check common installation paths
+          const possiblePaths = [
+            path.join(process.env['PROGRAMFILES'] || 'C:\\Program Files', 'Google\\Chrome\\Application\\chrome.exe'),
+            path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google\\Chrome\\Application\\chrome.exe'),
+            path.join(process.env['LOCALAPPDATA'] || '', 'Google\\Chrome\\Application\\chrome.exe'),
+          ];
+          
+          for (const chromePath of possiblePaths) {
+            if (fs.existsSync(chromePath)) {
+              systemChromePath = chromePath;
+              break;
+            }
+          }
+        } else if (platform === 'linux') {
+          // Linux
+          const possiblePaths = [
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/chromium',
+          ];
+          
+          for (const chromePath of possiblePaths) {
+            if (fs.existsSync(chromePath)) {
+              systemChromePath = chromePath;
+              break;
+            }
+          }
+        }
+        
+        if (systemChromePath && fs.existsSync(systemChromePath)) {
           launchOptions.executablePath = systemChromePath;
-          logger.info(`Using system Google Chrome: ${systemChromePath}`);
+          logger.info(`Using system Chrome: ${systemChromePath}`);
         } else {
-          // Fallback to Puppeteer's Chromium (will likely fail on this system)
+          // Fallback to Puppeteer's Chromium
           const puppeteer = require('puppeteer');
           const executablePath = puppeteer.executablePath();
           
           if (executablePath) {
             launchOptions.executablePath = executablePath;
-            logger.warn(`System Chrome not found, using Puppeteer Chromium: ${executablePath}`);
+            logger.info(`System Chrome not found, using Puppeteer Chromium: ${executablePath}`);
           } else {
-            logger.error('No Chrome/Chromium executable found!');
+            logger.warn('No Chrome/Chromium executable found, Puppeteer will attempt to download');
           }
         }
       } catch (pathError) {
