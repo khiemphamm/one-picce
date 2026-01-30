@@ -204,12 +204,54 @@ function initializeTables() {
     )
   `);
 
+  // Migration: Add missing columns to existing tables
+  // This handles databases created before proxy allocation feature
+  try {
+    logger.info('Starting database migration check...');
+    
+    // Check if proxies table has current_viewers column
+    const tableInfo = db.exec("PRAGMA table_info(proxies)");
+    logger.info('Table info retrieved', { 
+      hasResults: tableInfo.length > 0,
+      columnCount: tableInfo[0]?.values.length || 0 
+    });
+    
+    const columns = tableInfo[0]?.values.map(row => row[1]) || [];
+    logger.info('Existing columns', { columns });
+    
+    if (!columns.includes('max_viewers_per_proxy')) {
+      logger.info('Migrating database: Adding max_viewers_per_proxy column');
+      dbWrapper.exec(`
+        ALTER TABLE proxies ADD COLUMN max_viewers_per_proxy INTEGER DEFAULT 5
+      `);
+      logger.info('✅ max_viewers_per_proxy column added successfully');
+    } else {
+      logger.info('✓ max_viewers_per_proxy column already exists');
+    }
+    
+    if (!columns.includes('current_viewers')) {
+      logger.info('Migrating database: Adding current_viewers column');
+      dbWrapper.exec(`
+        ALTER TABLE proxies ADD COLUMN current_viewers INTEGER DEFAULT 0
+      `);
+      logger.info('✅ current_viewers column added successfully');
+    } else {
+      logger.info('✓ current_viewers column already exists');
+    }
+  } catch (error) {
+    logger.error('Migration failed!', { 
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
+  }
+
   logger.info('Database tables initialized successfully');
 }
 
-// Initialize on import (async)
-initDatabase().catch(err => {
+// Initialize on import (async) and export promise
+export const dbReady = initDatabase().catch(err => {
   logger.error('Failed to initialize database', { error: err.message });
+  throw err; // Re-throw to prevent silent failures
 });
 
 export default dbWrapper as any;

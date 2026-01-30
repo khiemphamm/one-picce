@@ -54,6 +54,14 @@ export class ViewerSession {
           '--disable-renderer-backgrounding',
           '--disable-images', // Additional optimization
           '--blink-settings=imagesEnabled=false', // Block images at blink level
+          
+          // CRITICAL: Prevent network requests during launch that cause socket hang up
+          '--disable-component-update', // Disable component updates
+          '--disable-background-networking', // Disable background network requests
+          '--disable-sync', // Disable sync
+          '--disable-default-apps', // Disable default apps
+          '--no-default-browser-check', // Skip default browser check
+          '--disable-client-side-phishing-detection', // Disable phishing detection
         ],
       };
 
@@ -87,6 +95,33 @@ export class ViewerSession {
             error: proxyError instanceof Error ? proxyError.message : String(proxyError),
           });
         }
+      }
+
+      // WORKAROUND: Use system Chrome instead of Puppeteer's Chromium
+      // Puppeteer's Chromium has system-level issues on this macOS (socket hang up)
+      try {
+        const fs = require('fs');
+        const systemChromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+        
+        if (fs.existsSync(systemChromePath)) {
+          launchOptions.executablePath = systemChromePath;
+          logger.info(`Using system Google Chrome: ${systemChromePath}`);
+        } else {
+          // Fallback to Puppeteer's Chromium (will likely fail on this system)
+          const puppeteer = require('puppeteer');
+          const executablePath = puppeteer.executablePath();
+          
+          if (executablePath) {
+            launchOptions.executablePath = executablePath;
+            logger.warn(`System Chrome not found, using Puppeteer Chromium: ${executablePath}`);
+          } else {
+            logger.error('No Chrome/Chromium executable found!');
+          }
+        }
+      } catch (pathError) {
+        logger.error('Failed to set executable path', {
+          error: pathError instanceof Error ? pathError.message : String(pathError),
+        });
       }
 
       this.browser = await puppeteerExtra.launch(launchOptions);
@@ -208,10 +243,50 @@ export class ViewerSession {
       this.startKeepAlive();
 
     } catch (error) {
-      logger.error(`Failed to start viewer session #${this.config.viewerIndex}`, {
-        error: error instanceof Error ? error.message : String(error),
+      // Enhanced error logging - serialize full error object
+      const errorDetails: any = {
+        message: error instanceof Error ? error.message : String(error),
+        type: error?.constructor?.name || typeof error,
         sessionId: this.config.sessionId,
-      });
+      };
+
+      // Special handling for ErrorEvent (browser/Puppeteer errors)
+      if (error && typeof error === 'object' && 'type' in error && error.type === 'error') {
+        const errorEvent = error as any;
+        errorDetails.eventType = 'ErrorEvent';
+        errorDetails.message = errorEvent.message || errorEvent.error?.message || 'Unknown error';
+        errorDetails.filename = errorEvent.filename;
+        errorDetails.lineno = errorEvent.lineno;
+        errorDetails.colno = errorEvent.colno;
+        if (errorEvent.error) {
+          errorDetails.errorMessage = errorEvent.error.message;
+          errorDetails.errorStack = errorEvent.error.stack;
+        }
+      }
+
+      // Add stack trace if available
+      if (error instanceof Error && error.stack) {
+        errorDetails.stack = error.stack;
+      }
+
+      // Add all enumerable properties from error object
+      if (typeof error === 'object' && error !== null) {
+        Object.keys(error).forEach(key => {
+          if (!errorDetails[key]) {
+            try {
+              const value = (error as any)[key];
+              // Only add serializable values
+              if (value !== undefined && value !== null && typeof value !== 'function') {
+                errorDetails[key] = value;
+              }
+            } catch (e) {
+              // Skip non-serializable properties
+            }
+          }
+        });
+      }
+
+      logger.error(`Failed to start viewer session #${this.config.viewerIndex}`, errorDetails);
       throw error;
     }
   }

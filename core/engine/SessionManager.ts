@@ -17,12 +17,14 @@ export interface SessionStats {
   failedViewers: number;
   cpuUsage: number;
   memoryUsage: number;
+  startTime?: number; // Unix timestamp when session started
 }
 
 export class SessionManager {
   private sessions: ViewerSession[] = [];
   private currentSessionId: number | null = null;
   private isRunning = false;
+  private sessionStartTime: number | null = null; // Track when session started
   private resourceMonitor = new ResourceMonitor();
   private statsInterval: NodeJS.Timeout | null = null;
   private proxyAllocations: Map<number, number[]> = new Map(); // Track which viewers use which proxy
@@ -52,6 +54,7 @@ export class SessionManager {
       }
       
       this.isRunning = true;
+      this.sessionStartTime = Date.now(); // Record start time
 
       logger.info(`Starting ${config.viewerCount} viewers with session ID ${this.currentSessionId}`);
 
@@ -144,9 +147,50 @@ export class SessionManager {
             }
 
           } catch (error) {
-            logger.error(`Failed to start viewer #${i + 1}`, {
-              error: error instanceof Error ? error.message : String(error),
-            });
+            // Enhanced error logging - serialize full error object
+            const errorDetails: any = {
+              message: error instanceof Error ? error.message : String(error),
+              type: error?.constructor?.name || typeof error,
+              viewerIndex: i + 1,
+            };
+
+            // Special handling for ErrorEvent (browser/Puppeteer errors)
+            if (error && typeof error === 'object' && 'type' in error && error.type === 'error') {
+              const errorEvent = error as any;
+              errorDetails.eventType = 'ErrorEvent';
+              errorDetails.message = errorEvent.message || errorEvent.error?.message || 'Unknown error';
+              errorDetails.filename = errorEvent.filename;
+              errorDetails.lineno = errorEvent.lineno;
+              errorDetails.colno = errorEvent.colno;
+              if (errorEvent.error) {
+                errorDetails.errorMessage = errorEvent.error.message;
+                errorDetails.errorStack = errorEvent.error.stack;
+              }
+            }
+
+            // Add stack trace if available
+            if (error instanceof Error && error.stack) {
+              errorDetails.stack = error.stack;
+            }
+
+            // Add all enumerable properties from error object
+            if (typeof error === 'object' && error !== null) {
+              Object.keys(error).forEach(key => {
+                if (!errorDetails[key]) {
+                  try {
+                    const value = (error as any)[key];
+                    // Only add serializable values
+                    if (value !== undefined && value !== null && typeof value !== 'function') {
+                      errorDetails[key] = value;
+                    }
+                  } catch (e) {
+                    // Skip non-serializable properties
+                  }
+                }
+              });
+            }
+
+            logger.error(`Failed to start viewer #${i + 1}`, errorDetails);
 
             // Release proxy allocation on failure
             if (proxy && proxy.id && useProxyAllocation) {
@@ -266,6 +310,7 @@ export class SessionManager {
       // Force cleanup
       this.sessions = [];
       this.currentSessionId = null;
+      this.sessionStartTime = null; // Reset start time
 
       logger.info('Session stopped successfully');
 
@@ -322,6 +367,7 @@ export class SessionManager {
     // Force cleanup
     this.sessions = [];
     this.currentSessionId = null;
+    this.sessionStartTime = null; // Reset start time
     this.proxyAllocations.clear();
 
     logger.info('Force stop completed');
@@ -340,6 +386,7 @@ export class SessionManager {
       failedViewers: this.sessions.length - activeViewers,
       cpuUsage: resources.cpuUsage,
       memoryUsage: resources.memoryUsage.percentage,
+      startTime: this.sessionStartTime ?? undefined, // Include start time
     };
   }
 

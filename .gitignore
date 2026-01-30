@@ -54,3 +54,5 @@ temp/
 # Config overrides
 config/local.json
 config/proxies.json
+
+.agent/

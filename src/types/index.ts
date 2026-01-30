@@ -37,8 +37,11 @@ export interface StatsUpdate {
     failedViewers: number;
     cpuUsage: number;
     memoryUsage: number;
+    startTime?: number; // Unix timestamp for uptime calculation
   };
-  proxies: ProxyStats;
+  proxies: ProxyStats & {
+    list?: Proxy[]; // Full proxy list for table display
+  };
 }
 
 export interface IPCResponse<T = any> {

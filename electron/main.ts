@@ -3,6 +3,7 @@ import path from 'path';
 import SessionManager from '../core/engine/SessionManager';
 import ProxyManager from '../core/proxy/ProxyManager';
 import logger from '../core/utils/logger';
+import { dbReady } from '../core/database/db';
 
 const isDev = !app.isPackaged;
 
@@ -221,7 +222,11 @@ ipcMain.handle('remove-proxy', async (_event, proxyId: number) => {
  */
 let statsInterval: NodeJS.Timeout | null = null;
 
-function startStatsBroadcast() {
+async function startStatsBroadcast() {
+  // Wait for database to be fully initialized before broadcasting stats
+  await dbReady;
+  logger.info('Database ready, starting stats broadcast');
+  
   if (statsInterval) {
     clearInterval(statsInterval);
   }
@@ -233,13 +238,17 @@ function startStatsBroadcast() {
       const stats = SessionManager.getStats();
       const isRunning = SessionManager.isSessionRunning();
       const proxyStats = ProxyManager.getStats();
+      const proxyList = ProxyManager.getAllProxies(); // Get full proxy list
       
       mainWindow.webContents.send('stats-update', {
         session: {
           isRunning,
           ...stats,
         },
-        proxies: proxyStats,
+        proxies: {
+          ...proxyStats,
+          list: proxyList, // Include proxy list for table display
+        },
       });
     } catch (error) {
       logger.error('Failed to broadcast stats', { error: error instanceof Error ? error.message : String(error) });
