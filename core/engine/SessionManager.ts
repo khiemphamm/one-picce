@@ -45,22 +45,28 @@ export class SessionManager {
       logger.info('Starting new session', config);
 
       // Create session in database
-      const result = db.prepare(`
+      const result = db
+        .prepare(
+          `
         INSERT INTO sessions (livestream_url, viewer_count, status, platform)
         VALUES (?, ?, 'active', ?)
-      `).run(config.livestreamUrl, config.viewerCount, config.platform || 'youtube');
+      `
+        )
+        .run(config.livestreamUrl, config.viewerCount, config.platform || 'youtube');
 
       this.currentSessionId = result.lastInsertRowid as number;
-      
+
       // CRITICAL: Validate sessionId before continuing
       if (!this.currentSessionId || this.currentSessionId === 0) {
         throw new Error('Failed to create session in database: Invalid session ID');
       }
-      
+
       this.isRunning = true;
       this.sessionStartTime = Date.now(); // Record start time
 
-      logger.info(`Starting ${config.viewerCount} viewers with session ID ${this.currentSessionId}`);
+      logger.info(
+        `Starting ${config.viewerCount} viewers with session ID ${this.currentSessionId}`
+      );
 
       // Update max viewers per proxy if specified
       if (config.maxViewersPerProxy && config.maxViewersPerProxy > 0) {
@@ -70,13 +76,15 @@ export class SessionManager {
 
       // Check if we should use proxy allocation feature
       const useProxyAllocation = config.useProxyAllocation !== false; // Default to true
-      
+
       if (useProxyAllocation) {
         logger.info('Using smart proxy allocation feature');
         const proxyStats = ProxyManager.getStats();
-        
+
         if (proxyStats.availableCapacity < config.viewerCount) {
-          logger.warn(`Insufficient proxy capacity! Needed: ${config.viewerCount}, Available: ${proxyStats.availableCapacity}`);
+          logger.warn(
+            `Insufficient proxy capacity! Needed: ${config.viewerCount}, Available: ${proxyStats.availableCapacity}`
+          );
           logger.warn('Some viewers will share proxies or may not have proxies assigned');
         }
       }
@@ -87,15 +95,15 @@ export class SessionManager {
       for (let i = 0; i < config.viewerCount; i++) {
         // Get proxy based on allocation strategy
         let proxy = null;
-        
+
         if (useProxyAllocation) {
           // NEW: Use smart allocation - get proxy with available capacity
           proxy = ProxyManager.getAvailableProxyWithCapacity();
-          
+
           if (proxy && proxy.id) {
             // Allocate viewer slot to this proxy
             const allocated = ProxyManager.allocateViewerToProxy(proxy.id);
-            
+
             if (!allocated) {
               // Allocation failed, try to get another proxy
               proxy = ProxyManager.getAvailableProxyWithCapacity();
@@ -103,7 +111,7 @@ export class SessionManager {
                 ProxyManager.allocateViewerToProxy(proxy.id);
               }
             }
-            
+
             // Track allocation
             if (proxy && proxy.id) {
               if (!this.proxyAllocations.has(proxy.id)) {
@@ -121,13 +129,6 @@ export class SessionManager {
           logger.warn(`No available proxy for viewer #${i + 1}`);
         }
 
-        // Check for memory pressure before starting each viewer
-        const stats = this.resourceMonitor.getStats(this.sessions.length);
-        if (stats.memoryUsage.percentage > 95) {
-          logger.warn(`Skipping viewer #${i + 1} due to high memory usage (${stats.memoryUsage.percentage.toFixed(1)}%)`);
-          continue;
-        }
-
         const viewerSession = new ViewerSession({
           url: config.livestreamUrl,
           proxy: proxy || undefined,
@@ -142,7 +143,7 @@ export class SessionManager {
         setTimeout(async () => {
           try {
             await viewerSession.start();
-            
+
             // Mark proxy as successful if used
             if (proxy) {
               ProxyManager.markProxySuccess(proxy.id!);
@@ -150,14 +151,17 @@ export class SessionManager {
 
             // Record viewer session in database (with validation)
             if (this.currentSessionId && this.currentSessionId > 0) {
-              db.prepare(`
+              db.prepare(
+                `
                 INSERT INTO viewer_sessions (session_id, proxy_id, status)
                 VALUES (?, ?, 'active')
-              `).run(this.currentSessionId, proxy?.id || null);
+              `
+              ).run(this.currentSessionId, proxy?.id || null);
             } else {
-              logger.warn(`Viewer #${i + 1} started but currentSessionId is invalid: ${this.currentSessionId}`);
+              logger.warn(
+                `Viewer #${i + 1} started but currentSessionId is invalid: ${this.currentSessionId}`
+              );
             }
-
           } catch (error) {
             // Enhanced error logging - serialize full error object
             const errorDetails: any = {
@@ -170,7 +174,8 @@ export class SessionManager {
             if (error && typeof error === 'object' && 'type' in error && error.type === 'error') {
               const errorEvent = error as any;
               errorDetails.eventType = 'ErrorEvent';
-              errorDetails.message = errorEvent.message || errorEvent.error?.message || 'Unknown error';
+              errorDetails.message =
+                errorEvent.message || errorEvent.error?.message || 'Unknown error';
               errorDetails.filename = errorEvent.filename;
               errorDetails.lineno = errorEvent.lineno;
               errorDetails.colno = errorEvent.colno;
@@ -216,16 +221,20 @@ export class SessionManager {
 
             // Record failed viewer session (with validation)
             if (this.currentSessionId && this.currentSessionId > 0) {
-              db.prepare(`
+              db.prepare(
+                `
                 INSERT INTO viewer_sessions (session_id, proxy_id, status, error_message, ended_at)
                 VALUES (?, ?, 'failed', ?, CURRENT_TIMESTAMP)
-              `).run(
+              `
+              ).run(
                 this.currentSessionId,
                 proxy?.id || null,
                 error instanceof Error ? error.message : String(error)
               );
             } else {
-              logger.warn(`Cannot record failed viewer #${i + 1}: invalid sessionId ${this.currentSessionId}`);
+              logger.warn(
+                `Cannot record failed viewer #${i + 1}: invalid sessionId ${this.currentSessionId}`
+              );
             }
           }
         }, i * STAGGER_DELAY);
@@ -235,7 +244,6 @@ export class SessionManager {
       this.startStatsMonitoring();
 
       logger.info(`Session started with ${config.viewerCount} viewers`);
-
     } catch (error) {
       this.isRunning = false;
       logger.error('Failed to start session', {
@@ -271,15 +279,12 @@ export class SessionManager {
       const stopPromises = this.sessions.map(async (session, index) => {
         try {
           // Add timeout to prevent hanging
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Stop timeout')), 10000) // 10s timeout
+          const timeoutPromise = new Promise(
+            (_, reject) => setTimeout(() => reject(new Error('Stop timeout')), 10000) // 10s timeout
           );
-          
-          await Promise.race([
-            session.stop(),
-            timeoutPromise
-          ]);
-          
+
+          await Promise.race([session.stop(), timeoutPromise]);
+
           logger.debug(`Stopped viewer ${index + 1}/${this.sessions.length}`);
         } catch (error) {
           logger.error(`Failed to stop viewer ${index + 1}`, {
@@ -304,18 +309,22 @@ export class SessionManager {
 
       // Update database
       if (this.currentSessionId) {
-        db.prepare(`
+        db.prepare(
+          `
           UPDATE sessions 
           SET status = 'stopped', ended_at = CURRENT_TIMESTAMP 
           WHERE id = ?
-        `).run(this.currentSessionId);
+        `
+        ).run(this.currentSessionId);
 
-        db.prepare(`
+        db.prepare(
+          `
           UPDATE viewer_sessions 
           SET status = 'stopped', ended_at = CURRENT_TIMESTAMP 
           WHERE session_id = ? AND status = 'active'
-        `).run(this.currentSessionId);
-        
+        `
+        ).run(this.currentSessionId);
+
         logger.debug('Updated database records');
       }
 
@@ -325,12 +334,11 @@ export class SessionManager {
       this.sessionStartTime = null; // Reset start time
 
       logger.info('Session stopped successfully');
-
     } catch (error) {
       logger.error('Error stopping session', {
         error: error instanceof Error ? error.message : String(error),
       });
-      
+
       // FORCE CLEANUP even on error
       this.isRunning = false;
       this.sessions = [];
@@ -340,7 +348,7 @@ export class SessionManager {
         clearInterval(this.statsInterval);
         this.statsInterval = null;
       }
-      
+
       throw error;
     }
   }
@@ -351,17 +359,17 @@ export class SessionManager {
    */
   async forceStopAll(): Promise<void> {
     logger.warn('FORCE STOPPING all sessions...');
-    
+
     // Stop everything immediately
     this.isRunning = false;
-    
+
     if (this.statsInterval) {
       clearInterval(this.statsInterval);
       this.statsInterval = null;
     }
 
     // Try to kill all browser processes
-    const killPromises = this.sessions.map(async (session) => {
+    const killPromises = this.sessions.map(async session => {
       try {
         // Force stop without waiting
         await session.stop();
@@ -373,7 +381,7 @@ export class SessionManager {
     // Wait max 5 seconds
     await Promise.race([
       Promise.all(killPromises),
-      new Promise(resolve => setTimeout(resolve, 5000))
+      new Promise(resolve => setTimeout(resolve, 5000)),
     ]);
 
     // Force cleanup
@@ -425,11 +433,15 @@ export class SessionManager {
    * Get session history
    */
   getSessionHistory(limit = 10) {
-    return db.prepare(`
+    return db
+      .prepare(
+        `
       SELECT * FROM sessions 
       ORDER BY created_at DESC 
       LIMIT ?
-    `).all(limit);
+    `
+      )
+      .all(limit);
   }
 }
 

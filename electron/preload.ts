@@ -24,6 +24,15 @@ contextBridge.exposeInMainWorld('electron', {
   onStatsUpdate: (callback: (stats: any) => void) => {
     ipcRenderer.on('stats-update', (_event: any, stats: any) => callback(stats));
   },
+
+  // Auto-update
+  onUpdateAvailable: (callback: () => void) => {
+    ipcRenderer.on('update-available', () => callback());
+  },
+  onUpdateDownloaded: (callback: () => void) => {
+    ipcRenderer.on('update-downloaded', () => callback());
+  },
+  installUpdate: () => ipcRenderer.invoke('install-update'),
 });
 
 // Type definitions for window.electron
@@ -34,7 +43,11 @@ export interface IPCResponse<T = any> {
 }
 
 export interface ElectronAPI {
-  startSession: (url: string, viewerCount: number, platform?: 'youtube' | 'tiktok') => Promise<IPCResponse>;
+  startSession: (
+    url: string,
+    viewerCount: number,
+    platform?: 'youtube' | 'tiktok'
+  ) => Promise<IPCResponse>;
   stopSession: () => Promise<IPCResponse>;
   forceStopSession: () => Promise<IPCResponse>;
   getSessionStatus: () => Promise<IPCResponse>;
@@ -43,6 +56,9 @@ export interface ElectronAPI {
   removeProxy: (proxyId: number) => Promise<IPCResponse>;
   onLog: (callback: (log: any) => void) => void;
   onStatsUpdate: (callback: (stats: any) => void) => void;
+  onUpdateAvailable: (callback: () => void) => void;
+  onUpdateDownloaded: (callback: () => void) => void;
+  installUpdate: () => Promise<void>;
 }
 
 declare global {

@@ -56,6 +56,7 @@
 - **Resource Management**: Always close pages and browser instances in a `finally` block or explicit `stop()` method to prevent memory leaks.
 - **Stealth**: Use `puppeteer-extra-plugin-stealth` and randomized fingerprints (User Agents, Viewports) for all viewer sessions.
 - **Optimization**: Block unnecessary resources (images, fonts, CSS) in viewer sessions to minimize CPU/RAM usage.
+- **Auto-Updates**: Application updates are handled by `electron-updater`. Main process listens for `update-available` and `update-downloaded` events and notifies the renderer.
 
 ---
 

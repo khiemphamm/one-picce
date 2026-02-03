@@ -1,22 +1,41 @@
 import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import path from 'path';
 import fs from 'fs';
+import { app } from 'electron';
 import logger from '../utils/logger';
 
-const DB_PATH = path.join(process.cwd(), 'data', 'tool-live.db');
-
-// Ensure data directory exists
-const dataDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+// Default DB path (fallback for initialization)
+let DB_PATH: string;
+try {
+  DB_PATH = path.join(process.cwd(), 'data', 'tool-live.db');
+} catch {
+  DB_PATH = 'tool-live.db'; // Simple fallback
 }
+
+// In production, we'll override this
+export const setDatabasePath = (newPath: string) => {
+  DB_PATH = newPath;
+  const dataDir = path.dirname(DB_PATH);
+  if (!fs.existsSync(dataDir)) {
+    try {
+      fs.mkdirSync(dataDir, { recursive: true });
+    } catch (err) {
+      console.error(`Failed to create data directory ${dataDir}: ${err}`);
+    }
+  }
+};
 
 let db: SqlJsDatabase;
 
 // Initialize database
 async function initDatabase() {
+  // Wait for a small delay to ensure setDatabasePath had a chance to run in production
+  if (app && app.isPackaged) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
   const SQL = await initSqlJs();
-  
+
   // Try to load existing database
   if (fs.existsSync(DB_PATH)) {
     const buffer = fs.readFileSync(DB_PATH);
@@ -29,7 +48,7 @@ async function initDatabase() {
 
   // Initialize tables
   initializeTables();
-  
+
   // Save database to disk
   saveDatabase();
 }
@@ -50,16 +69,16 @@ class DatabaseWrapper {
       const result = db.exec('SELECT last_insert_rowid() as id');
       const lastId = result[0]?.values[0]?.[0] || 0;
       saveDatabase();
-      
+
       return {
         lastInsertRowid: lastId,
         changes: 1,
       };
     } catch (error) {
-      logger.error('Database run error', { 
-        sql, 
-        params, 
-        error: error instanceof Error ? error.message : String(error) 
+      logger.error('Database run error', {
+        sql,
+        params,
+        error: error instanceof Error ? error.message : String(error),
       });
       throw error;
     }
@@ -74,21 +93,21 @@ class DatabaseWrapper {
           const result = db.exec('SELECT last_insert_rowid() as id');
           const lastId = result[0]?.values[0]?.[0] || 0;
           saveDatabase();
-          
+
           // Log for debugging
           if (sql.includes('INSERT INTO sessions')) {
             logger.debug('Session inserted', { lastId, sql: sql.substring(0, 50) });
           }
-          
+
           return {
             lastInsertRowid: lastId,
             changes: 1,
           };
         } catch (error) {
-          logger.error('Database prepare.run error', { 
-            sql, 
-            params, 
-            error: error instanceof Error ? error.message : String(error) 
+          logger.error('Database prepare.run error', {
+            sql,
+            params,
+            error: error instanceof Error ? error.message : String(error),
           });
           throw error;
         }
@@ -96,11 +115,11 @@ class DatabaseWrapper {
       get: (...params: any[]) => {
         const results = db.exec(sql, params);
         if (results.length === 0) return undefined;
-        
+
         const columns = results[0].columns;
         const values = results[0].values[0];
         if (!values) return undefined;
-        
+
         const row: any = {};
         columns.forEach((col, idx) => {
           row[col] = values[idx];
@@ -110,10 +129,10 @@ class DatabaseWrapper {
       all: (...params: any[]) => {
         const results = db.exec(sql, params);
         if (results.length === 0) return [];
-        
+
         const columns = results[0].columns;
         const values = results[0].values;
-        
+
         return values.map(row => {
           const obj: any = {};
           columns.forEach((col, idx) => {
@@ -208,21 +227,21 @@ function initializeTables() {
   // This handles databases created before proxy allocation feature
   try {
     logger.info('Starting database migration check...');
-    
+
     // Check if proxies table has current_viewers column
-    const tableInfo = db.exec("PRAGMA table_info(proxies)");
-    logger.info('Table info retrieved', { 
+    const tableInfo = db.exec('PRAGMA table_info(proxies)');
+    logger.info('Table info retrieved', {
       hasResults: tableInfo.length > 0,
-      columnCount: tableInfo[0]?.values.length || 0 
+      columnCount: tableInfo[0]?.values.length || 0,
     });
-    
+
     const columns = tableInfo[0]?.values.map(row => row[1]) || [];
     logger.info('Existing columns', { columns });
 
     // Sessions table migrations
-    const sessionsTableInfo = db.exec("PRAGMA table_info(sessions)");
+    const sessionsTableInfo = db.exec('PRAGMA table_info(sessions)');
     const sessionsColumns = sessionsTableInfo[0]?.values.map(row => row[1]) || [];
-    
+
     if (!sessionsColumns.includes('platform')) {
       logger.info('Migrating database: Adding platform column to sessions table');
       dbWrapper.exec(`
@@ -241,7 +260,7 @@ function initializeTables() {
     } else {
       logger.info('✓ max_viewers_per_proxy column already exists');
     }
-    
+
     if (!columns.includes('current_viewers')) {
       logger.info('Migrating database: Adding current_viewers column');
       dbWrapper.exec(`
@@ -252,9 +271,9 @@ function initializeTables() {
       logger.info('✓ current_viewers column already exists');
     }
   } catch (error) {
-    logger.error('Migration failed!', { 
+    logger.error('Migration failed!', {
       error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined
+      stack: error instanceof Error ? error.stack : undefined,
     });
   }
 

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Dashboard from './components/Dashboard';
 import ProxyManager from './components/ProxyManager';
+import UpdateNotification from './components/UpdateNotification';
 import type { StatsUpdate } from './types';
 
 type TabType = 'dashboard' | 'proxies';
@@ -11,6 +12,12 @@ function App() {
 
   const handleStatsUpdate = (update: StatsUpdate) => {
     setStats(update);
+  };
+
+  const handleInstallUpdate = () => {
+    if (window.electron) {
+      window.electron.installUpdate();
+    }
   };
 
   const tabs = [
@@ -35,21 +42,29 @@ function App() {
                 <p className="text-xs text-gray-600">Làm top 1 streamer</p>
               </div>
             </div>
-            
+
             {/* Status Indicator */}
             <div className="flex items-center gap-6">
               <div className="hidden md:flex items-center gap-4 text-sm">
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-100 border border-gray-200">
-                  <div className={`w-2 h-2 rounded-full ${stats?.session.isRunning ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
-                  <span className="text-gray-700 font-medium">{stats?.session.isRunning ? 'Active' : 'Idle'}</span>
+                  <div
+                    className={`w-2 h-2 rounded-full ${stats?.session.isRunning ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}
+                  ></div>
+                  <span className="text-gray-700 font-medium">
+                    {stats?.session.isRunning ? 'Active' : 'Idle'}
+                  </span>
                 </div>
                 <div className="px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200">
                   <span className="text-gray-600">Viewers: </span>
-                  <span className="font-semibold text-blue-600">{stats?.session.activeViewers ?? 0}</span>
+                  <span className="font-semibold text-blue-600">
+                    {stats?.session.activeViewers ?? 0}
+                  </span>
                 </div>
                 <div className="px-3 py-1.5 rounded-lg bg-purple-50 border border-purple-200">
                   <span className="text-gray-600">Proxies: </span>
-                  <span className="font-semibold text-purple-600">{stats?.proxies.active ?? 0}/{stats?.proxies.total ?? 0}</span>
+                  <span className="font-semibold text-purple-600">
+                    {stats?.proxies.active ?? 0}/{stats?.proxies.total ?? 0}
+                  </span>
                 </div>
               </div>
             </div>
@@ -57,7 +72,7 @@ function App() {
 
           {/* Tab Navigation */}
           <nav className="flex gap-1 mt-4">
-            {tabs.map((tab) => (
+            {tabs.map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
@@ -82,6 +97,9 @@ function App() {
           {activeTab === 'proxies' && <ProxyManager />}
         </div>
       </main>
+
+      {/* Update Notification */}
+      <UpdateNotification onInstall={handleInstallUpdate} />
 
       {/* Footer */}
       <footer className="mt-auto py-4 text-center text-xs text-gray-500 border-t border-gray-200">

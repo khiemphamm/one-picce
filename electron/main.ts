@@ -1,13 +1,24 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
+import { autoUpdater } from 'electron-updater';
 import path from 'path';
 import SessionManager from '../core/engine/SessionManager';
 import ProxyManager from '../core/proxy/ProxyManager';
-import logger from '../core/utils/logger';
-import { dbReady } from '../core/database/db';
+import logger, { setLogDirectory } from '../core/utils/logger';
+import { dbReady, setDatabasePath } from '../core/database/db';
 
 const isDev = !app.isPackaged;
 
+// Set up paths for production
+if (!isDev) {
+  const userDataPath = app.getPath('userData');
+  setLogDirectory(path.join(userDataPath, 'logs'));
+  setDatabasePath(path.join(userDataPath, 'data', 'tool-live.db'));
+}
+
 let mainWindow: BrowserWindow | null = null;
+
+// Configure autoUpdater logging
+autoUpdater.logger = logger;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -37,15 +48,35 @@ function createWindow() {
   // Show window when ready
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
-    
+
     // Start broadcasting stats
     startStatsBroadcast();
+
+    // Check for updates
+    if (!isDev) {
+      autoUpdater.checkForUpdatesAndNotify();
+    }
   });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
+
+// AutoUpdater events
+autoUpdater.on('update-available', () => {
+  logger.info('Update available');
+  mainWindow?.webContents.send('update-available');
+});
+
+autoUpdater.on('update-downloaded', () => {
+  logger.info('Update downloaded');
+  mainWindow?.webContents.send('update-downloaded');
+});
+
+ipcMain.handle('install-update', () => {
+  autoUpdater.quitAndInstall();
+});
 
 app.whenReady().then(() => {
   createWindow();
@@ -70,41 +101,48 @@ app.on('window-all-closed', () => {
 /**
  * Start a new viewer session
  */
-ipcMain.handle('start-session', async (_event, livestreamUrl: string, viewerCount: number, platform?: 'youtube' | 'tiktok') => {
-  try {
-    logger.info('IPC: start-session called', { livestreamUrl, viewerCount, platform });
-    
-    await SessionManager.startSession({
-      livestreamUrl,
-      viewerCount,
-      platform,
-    });
-    
-    return { success: true };
-  } catch (error) {
-    logger.error('IPC: start-session failed', { error: error instanceof Error ? error.message : String(error) });
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error' 
-    };
+ipcMain.handle(
+  'start-session',
+  async (_event, livestreamUrl: string, viewerCount: number, platform?: 'youtube' | 'tiktok') => {
+    try {
+      logger.info('IPC: start-session called', { livestreamUrl, viewerCount, platform });
+
+      await SessionManager.startSession({
+        livestreamUrl,
+        viewerCount,
+        platform,
+      });
+
+      return { success: true };
+    } catch (error) {
+      logger.error('IPC: start-session failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
   }
-});
+);
 
 /**
  * Stop the current session
  */
-ipcMain.handle('stop-session', async (_event) => {
+ipcMain.handle('stop-session', async _event => {
   try {
     logger.info('IPC: stop-session called');
-    
+
     await SessionManager.stopSession();
-    
+
     return { success: true };
   } catch (error) {
-    logger.error('IPC: stop-session failed', { error: error instanceof Error ? error.message : String(error) });
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error' 
+    logger.error('IPC: stop-session failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
 });
@@ -112,18 +150,20 @@ ipcMain.handle('stop-session', async (_event) => {
 /**
  * Force stop all sessions (emergency)
  */
-ipcMain.handle('force-stop-session', async (_event) => {
+ipcMain.handle('force-stop-session', async _event => {
   try {
     logger.warn('IPC: force-stop-session called');
-    
+
     await SessionManager.forceStopAll();
-    
+
     return { success: true };
   } catch (error) {
-    logger.error('IPC: force-stop-session failed', { error: error instanceof Error ? error.message : String(error) });
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error' 
+    logger.error('IPC: force-stop-session failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
 });
@@ -131,11 +171,11 @@ ipcMain.handle('force-stop-session', async (_event) => {
 /**
  * Get current session status
  */
-ipcMain.handle('get-session-status', async (_event) => {
+ipcMain.handle('get-session-status', async _event => {
   try {
     const stats = SessionManager.getStats();
     const isRunning = SessionManager.isSessionRunning();
-    
+
     return {
       success: true,
       data: {
@@ -144,10 +184,12 @@ ipcMain.handle('get-session-status', async (_event) => {
       },
     };
   } catch (error) {
-    logger.error('IPC: get-session-status failed', { error: error instanceof Error ? error.message : String(error) });
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error' 
+    logger.error('IPC: get-session-status failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
 });
@@ -158,15 +200,17 @@ ipcMain.handle('get-session-status', async (_event) => {
 ipcMain.handle('add-proxies', async (_event, proxyUrls: string[]) => {
   try {
     logger.info('IPC: add-proxies called', { count: proxyUrls.length });
-    
+
     ProxyManager.addProxies(proxyUrls);
-    
+
     return { success: true };
   } catch (error) {
-    logger.error('IPC: add-proxies failed', { error: error instanceof Error ? error.message : String(error) });
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error' 
+    logger.error('IPC: add-proxies failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
 });
@@ -174,11 +218,11 @@ ipcMain.handle('add-proxies', async (_event, proxyUrls: string[]) => {
 /**
  * Get all proxies
  */
-ipcMain.handle('get-proxies', async (_event) => {
+ipcMain.handle('get-proxies', async _event => {
   try {
     const proxies = ProxyManager.getAllProxies();
     const stats = ProxyManager.getStats();
-    
+
     return {
       success: true,
       data: {
@@ -187,10 +231,12 @@ ipcMain.handle('get-proxies', async (_event) => {
       },
     };
   } catch (error) {
-    logger.error('IPC: get-proxies failed', { error: error instanceof Error ? error.message : String(error) });
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error' 
+    logger.error('IPC: get-proxies failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
 });
@@ -201,15 +247,17 @@ ipcMain.handle('get-proxies', async (_event) => {
 ipcMain.handle('remove-proxy', async (_event, proxyId: number) => {
   try {
     logger.info('IPC: remove-proxy called', { proxyId });
-    
+
     ProxyManager.removeProxy(proxyId);
-    
+
     return { success: true };
   } catch (error) {
-    logger.error('IPC: remove-proxy failed', { error: error instanceof Error ? error.message : String(error) });
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error' 
+    logger.error('IPC: remove-proxy failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
 });
@@ -227,20 +275,20 @@ async function startStatsBroadcast() {
   // Wait for database to be fully initialized before broadcasting stats
   await dbReady;
   logger.info('Database ready, starting stats broadcast');
-  
+
   if (statsInterval) {
     clearInterval(statsInterval);
   }
-  
+
   statsInterval = setInterval(() => {
     if (!mainWindow) return;
-    
+
     try {
       const stats = SessionManager.getStats();
       const isRunning = SessionManager.isSessionRunning();
       const proxyStats = ProxyManager.getStats();
       const proxyList = ProxyManager.getAllProxies(); // Get full proxy list
-      
+
       mainWindow.webContents.send('stats-update', {
         session: {
           isRunning,
@@ -252,7 +300,9 @@ async function startStatsBroadcast() {
         },
       });
     } catch (error) {
-      logger.error('Failed to broadcast stats', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to broadcast stats', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }, 5000); // Every 5 seconds
 }
