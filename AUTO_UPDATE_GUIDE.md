@@ -1,41 +1,62 @@
-# Hướng dẫn Tự động Cập nhật & GitHub CI/CD
+# Hướng dẫn Tự động Cập nhật (Auto-Update) cho Tool Live
 
-Hướng dẫn này giải thích cách thiết lập và quản lý các bản cập nhật tự động cho ứng dụng **Tool Live** bằng GitHub Releases.
+Tài liệu này mô tả cách **thiết lập, phát hành và xác minh** auto-update cho ứng dụng **Tool Live** bằng **GitHub Releases** + `electron-updater`.
 
-## 🚀 Quy trình hoạt động
-1.  **Code**: `electron-updater` sẽ kiểm tra GitHub để xem có phiên bản nào mới hơn phiên bản hiện tại trong `package.json` không.
-2.  **Release**: Bạn push một "tag" phiên bản mới (ví dụ: `v1.0.1`) lên GitHub.
-3.  **Build**: GitHub Actions sẽ tự động build ứng dụng cho Windows và macOS.
-4.  **Deploy**: GitHub Actions tự động upload các bản cài đặt lên trang "Releases" của GitHub.
-5.  **Update**: Người dùng đang chạy app sẽ nhận được thông báo và có thể cài đặt bản cập nhật ngay lập tức.
+> Phạm vi: **Windows** (NSIS installer). macOS/Linux nằm ngoài phạm vi tài liệu này.
 
 ---
 
-## � GITHUB_TOKEN lấy ở đâu?
+## 1) Quy trình hoạt động (end-to-end)
 
-Có hai cách để sử dụng token:
-
-### Cách 1: Sử dụng Token tự động (Khuyên dùng)
-GitHub Actions đã có sẵn một token gọi là `secrets.GITHUB_TOKEN`. Bạn không cần phải copy nó từ đâu cả. Tuy nhiên, bạn cần cấp quyền cho nó:
-1.  Vào repository của bạn trên GitHub.
-2.  Chọn **Settings** > **Actions** > **General**.
-3.  Cuộn xuống phần **Workflow permissions**.
-4.  Chọn **Read and write permissions** (Quyền đọc và ghi).
-5.  Nhấn **Save**.
-*Token này sẽ tự động được sử dụng trong file workflow mà tôi đã tạo.*
-
-### Cách 2: Sử dụng Personal Access Token (PAT)
-Nếu bạn muốn dùng token riêng cho nhiều việc khác:
-1.  Vào [GitHub Settings > Tokens](https://github.com/settings/tokens).
-2.  Chọn **Generate new token (classic)**.
-3.  Chọn quyền `repo` và `workflow`.
-4.  Copy token và dán vào **Settings > Secrets and variables > Actions > New repository secret** với tên là `GH_TOKEN`.
+1. **Version**: Bạn tăng version trong `package.json` (ví dụ: `1.0.2`).
+2. **Tag**: Bạn tạo tag `v1.0.2` và push lên GitHub.
+3. **CI Build**: GitHub Actions build bản Windows và publish lên GitHub Releases.
+4. **Release Assets**: Release chứa file cài đặt + `latest.yml`.
+5. **Auto-Update**: App (đã cài bản cũ) tự kiểm tra update, tải về, và hiển thị nút **Restart & Install**.
 
 ---
 
-## 🤖 Thiết lập GitHub Actions
+## 2) Preflight Checklist (bắt buộc)
 
-Tệp tin tại `.github/workflows/release.yml` đã được tôi tạo sẵn với nội dung:
+- **Version phải tăng dần (monotonic)**: Version mới **phải lớn hơn** version đã release trước đó. Nếu giảm version, auto-update sẽ **không bao giờ** cập nhật được.
+- **Repo publish đúng**: `package.json > build.publish` phải trỏ đúng `owner/repo`.
+- **Release assets đầy đủ**: Release phải có `latest.yml` (electron-updater dùng file này để kiểm tra).
+- **Dùng NSIS installer**: Auto-update **chỉ hoạt động** với target **NSIS**. Bản `portable` **không hỗ trợ** auto-update.
+
+---
+
+## 3) Cấu hình trong codebase (đã có)
+
+Các phần sau đã được tích hợp sẵn:
+
+- `electron/main.ts` gọi `autoUpdater.checkForUpdatesAndNotify()` khi app chạy ở production.
+- Lắng nghe `update-available` và `update-downloaded`, gửi IPC sang renderer.
+- UI thông báo và nút **Restart & Install** nằm ở `src/components/UpdateNotification.tsx`.
+
+---
+
+## 4) Thiết lập GitHub Actions
+
+### 4.1. Cấp quyền cho GITHUB_TOKEN (Khuyên dùng)
+
+1. Vào **Settings** > **Actions** > **General**.
+2. **Workflow permissions** → chọn **Read and write permissions**.
+3. **Save**.
+
+Token `secrets.GITHUB_TOKEN` sẽ tự động có sẵn trong workflow.
+
+### 4.2. Khi nào cần PAT (GH_TOKEN)?
+
+Chỉ cần PAT nếu bạn **publish sang repo khác** (ví dụ repo public riêng). Khi đó:
+- Tạo PAT (Classic) với quyền `repo` + `workflow`.
+- Lưu vào GitHub Secrets với tên `GH_TOKEN`.
+- Dùng `GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}` trong workflow.
+
+---
+
+## 5) Workflow release (GitHub Actions)
+
+Tạo file: `.github/workflows/release.yml`
 
 ```yaml
 name: Build/Release
@@ -43,18 +64,14 @@ name: Build/Release
 on:
   push:
     tags:
-      - 'v*' # Chạy khi bạn push tag (ví dụ: v1.0.0)
+      - 'v*'
 
 jobs:
   release:
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      matrix:
-        os: [windows-latest, macos-latest]
+    runs-on: windows-latest
 
     steps:
-      - name: Check out git repository
+      - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Install Node.js
@@ -66,42 +83,64 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and Release
-        run: npm run package
+      - name: Build and Publish (Windows)
+        run: npm run package:win
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
----
-
-## 📦 Cách push bản cập nhật mới
-
-Mỗi khi bạn muốn ra mắt phiên bản mới:
-
-1.  **Cập nhật Version**: Đổi version trong `package.json` (ví dụ: `"version": "1.0.1"`).
-2.  **Commit thay đổi**:
-    ```bash
-    git add .
-    git commit -m "feat: cập nhật phiên bản 1.0.1"
-    ```
-3.  **Tạo Tag**:
-    ```bash
-    git tag v1.0.1
-    ```
-4.  **Push lên GitHub**:
-    ```bash
-    git push origin main --tags
-    ```
-
-GitHub Actions sẽ tự động làm phần việc còn lại!
+> Lưu ý: `electron-builder` sẽ publish lên GitHub Releases dựa vào cấu hình `build.publish` trong `package.json`.
 
 ---
 
-## 💻 Lưu ý về macOS
-Để tính năng tự động cập nhật hoạt động trên macOS, ứng dụng cần phải được **Code Signed** (Ký số) bằng chứng chỉ Apple Developer. Nếu không có chứng chỉ, người dùng macOS sẽ phải tải bản cài đặt mới thủ công từ GitHub.
+## 6) Cách phát hành phiên bản mới
+
+1. **Tăng version** trong `package.json` (ví dụ `1.0.2`).
+2. **Commit** thay đổi:
+   ```bash
+   git add package.json
+   git commit -m "chore: bump version 1.0.2"
+   ```
+3. **Tạo tag**:
+   ```bash
+   git tag v1.0.2
+   ```
+4. **Push**:
+   ```bash
+   git push origin main --tags
+   ```
+
+GitHub Actions sẽ tự build và publish release.
 
 ---
 
-## ❓ Xử lý lỗi
-- **Lỗi: 404 No release found**: Kiểm tra xem Repo đã để ở chế độ Công khai (Public) chưa, hoặc Token đã được cấp quyền "Read and write" chưa.
-- **Không thấy cập nhật**: Đảm bảo phiên bản trong `package.json` **cao hơn** phiên bản đang cài trên máy.
+## 7) Xác minh auto-update trên Windows
+
+1. Cài bản **cũ** (ví dụ `1.0.1`).
+2. Release bản **mới** (ví dụ `1.0.2`).
+3. Mở app cũ → hệ thống sẽ báo **New Version Available**.
+4. Chờ download xong → nút **Restart & Install** xuất hiện.
+5. App khởi động lại và cập nhật lên bản mới.
+
+---
+
+## 8) Troubleshooting
+
+- **Không thấy update**:
+  - Kiểm tra version đã **tăng** chưa.
+  - Đảm bảo release có file `latest.yml`.
+  - Đảm bảo bạn đang dùng bản **NSIS installer** (không phải portable).
+
+- **Lỗi 404 / No release found**:
+  - Repo release phải public hoặc dùng token/flow phù hợp.
+  - Kiểm tra `build.publish` trỏ đúng `owner/repo`.
+
+- **Không có workflow chạy**:
+  - Chỉ chạy khi push tag `v*`.
+  - Kiểm tra `.github/workflows/release.yml` có trong repo.
+
+---
+
+## 9) Ghi chú về macOS
+
+Auto-update trên macOS yêu cầu **code signing** + **notarization**. Phần này nằm ngoài phạm vi hướng dẫn Windows-only hiện tại.

@@ -3,18 +3,14 @@ name: Build/Release
 on:
   push:
     tags:
-      - 'v*' # Trigger on version tags (e.g., v1.0.0)
+      - 'v*'
 
 jobs:
   release:
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      matrix:
-        os: [windows-latest, macos-latest] # Build for Windows and macOS
+    runs-on: windows-latest
 
     steps:
-      - name: Check out git repository
+      - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Install Node.js
@@ -26,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and Release
-        run: npm run package
+      - name: Build and Publish (Windows)
+        run: npm run package:win
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
