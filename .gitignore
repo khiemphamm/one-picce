@@ -7,12 +7,10 @@ yarn.lock
 
 # Build outputs
 dist/
-build/
 release/
 *.tsbuildinfo
 
 # Database
-data/
 *.db
 *.db-journal
 
